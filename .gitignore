@@ -1,4 +1,4 @@
-# macOS
+# OS X
 .DS_Store
 
 # Xcode
@@ -18,6 +18,8 @@ profile
 DerivedData
 *.hmap
 *.ipa
+Example/Pods
+Example/Podfile.lock
 
 # Bundler
 .bundle
