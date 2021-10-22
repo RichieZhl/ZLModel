@@ -93,6 +93,9 @@ static inline NSString *zlmodel_autoTransformation(NSString *origin) {
 }
 
 static inline void inline_objectWithClassFromDictionary(id object, Class cls, NSDictionary *dic) {
+    if (![dic isKindOfClass:[NSDictionary class]]) {
+        return;
+    }
     unsigned int outCount, i;
     objc_property_t *properties = class_copyPropertyList(cls, &outCount);
     for (i = 0; i < outCount; i++) {
