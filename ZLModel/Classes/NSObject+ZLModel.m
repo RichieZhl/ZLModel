@@ -23,6 +23,7 @@ static NSString *const PropertyTypeULong = @"L";
 static NSString *const PropertyTypeULongLong = @"Q";
 static NSString *const PropertyTypeBOOL1 = @"c";
 static NSString *const PropertyTypeBOOL2 = @"b";
+static NSString *const PropertyTypeBOOL3 = @"B";
 static NSString *const PropertyTypeCharPointer = @"^*";
 
 static NSString *const PropertyTypeIvar = @"^^{objc_ivar=}";
@@ -36,77 +37,25 @@ static NSString *const PropertyTypeId = @"@";
 static const void *DateFormatString = "DateFormatString";
 static const void *NSDateFormatterString = "NSDateFormatterString";
 
-@implementation NSObject (ZLModel)
-
-+ (void)zl_swizzleSelector:(SEL)originalSelector withAnotherSelector:(SEL)swizzledSelector {
-    Class aClass = [self class];
-    
-    Method originalMethod = class_getInstanceMethod(aClass, originalSelector);
-    Method swizzledMethod = class_getInstanceMethod(aClass, swizzledSelector);
-    
-    BOOL didAddMethod =
-        class_addMethod(aClass,
-                        originalSelector,
-                        method_getImplementation(swizzledMethod),
-                        method_getTypeEncoding(swizzledMethod));
-    
-    if (didAddMethod) {
-        class_replaceMethod(aClass,
-                            swizzledSelector,
-                            method_getImplementation(originalMethod),
-                            method_getTypeEncoding(originalMethod));
-    } else {
-        method_exchangeImplementations(originalMethod, swizzledMethod);
-    }
-}
-
-+ (NSDateFormatter *)zl_dateFormatter {
-    NSDateFormatter *formatter = objc_getAssociatedObject(self, NSDateFormatterString);
-    NSString *dateFormatterString = [self zl_dateFormatString];
-    if (formatter == nil) {
-        if (dateFormatterString != nil && ![dateFormatterString isEqualToString:@""]) {
-            formatter = [[NSDateFormatter alloc] init];
-            formatter.timeZone = [NSTimeZone systemTimeZone];
-            formatter.dateFormat = dateFormatterString;
-            objc_setAssociatedObject(self, NSDateFormatterString, formatter, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        }
-    } else if (dateFormatterString == nil || [dateFormatterString isEqualToString:@""]) {
-        objc_setAssociatedObject(self, NSDateFormatterString, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    } else {
-        formatter.dateFormat = dateFormatterString;
-        formatter.timeZone = [NSTimeZone systemTimeZone];
-        objc_setAssociatedObject(self, NSDateFormatterString, formatter, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    return formatter;
-}
-
-+ (void)zl_setDateFormatString:(NSString *)string {
-    [self willChangeValueForKey:@"zl_dateFormatString"];
-    objc_setAssociatedObject(self, DateFormatString, string, OBJC_ASSOCIATION_COPY_NONATOMIC);
-    [self didChangeValueForKey:@"zl_dateFormatString"];
-}
-
-+ (NSString *)zl_dateFormatString {
-    return objc_getAssociatedObject(self, DateFormatString);
-}
-
-+ (NSArray *)basePropertyArray {
+static inline NSArray *zlmodel_basePropertyArray(void) {
     static NSArray *basePropertyArray = nil;
-    if (basePropertyArray == nil) {
-        basePropertyArray = @[PropertyTypeInt, PropertyTypeUInt, PropertyTypeShort, PropertyTypeUShort, PropertyTypeFloat, PropertyTypeDouble, PropertyTypeLong, PropertyTypeLongLong, PropertyTypeULong, PropertyTypeULongLong, PropertyTypeBOOL1, PropertyTypeBOOL2, PropertyTypeCharPointer];
-    }
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        basePropertyArray = @[PropertyTypeInt, PropertyTypeUInt, PropertyTypeShort, PropertyTypeUShort, PropertyTypeFloat, PropertyTypeDouble, PropertyTypeLong, PropertyTypeLongLong, PropertyTypeULong, PropertyTypeULongLong, PropertyTypeBOOL1, PropertyTypeBOOL2, PropertyTypeBOOL3, PropertyTypeCharPointer];
+    });
     return basePropertyArray;
 }
 
-+ (NSArray *)defaultIgnorePropertyArray {
+static inline NSArray *zlmodel_defaultIgnorePropertyArray(void) {
     static NSArray *defaultIgnorePropertyArray = nil;
-    if (defaultIgnorePropertyArray == nil) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
         defaultIgnorePropertyArray = @[PropertyTypeIvar, PropertyTypeMethod, PropertyTypeStruct, PropertyTypeBlock, PropertyTypeClass, PropertyTypeSEL, PropertyTypeId];
-    }
+    });
     return defaultIgnorePropertyArray;
 }
 
-+ (NSString *)propertyTypeEncoding:(objc_property_t)property {
+static inline NSString *zlmodel_propertyTypeEncoding(objc_property_t property) {
     char attr[256] = { 0 };
     char *attributes = attr;
     memset(attributes, 0, sizeof(char) * 256);
@@ -117,51 +66,50 @@ static const void *NSDateFormatterString = "NSDateFormatterString";
     return [NSString stringWithUTF8String:type + 1];
 }
 
-+ (BOOL)isFromFoundation:(NSString *)propertyType {
+static inline BOOL zlmodel_isFromFoundation(NSString *propertyType) {
     if (([propertyType hasPrefix:@"@\"NS"] || [propertyType hasPrefix:@"@\"UI"] || [propertyType hasPrefix:@"@\"CG"]) && [propertyType hasSuffix:@"\""]) {
         return YES;
     }
     return NO;
 }
 
-+ (NSString *)classStringFromFoundationPropertyType:(NSString *)propertyType {
-    if ([self isFromFoundation:propertyType]) {
+static inline NSString *zlmodel_classStringFromFoundationPropertyType(NSString *propertyType) {
+    if (zlmodel_isFromFoundation(propertyType)) {
         return [propertyType substringWithRange:NSMakeRange(2, propertyType.length - 3)];
     }
     return nil;
 }
 
-+ (NSDictionary *)zl_objectClassInArray {
-    return @{@"": @""};
-}
-
-+ (NSString *)autoTransformation:(NSString *)origin {
-    NSArray *needsAutoTransformationArray = @[@"ID", @"DESCRIPTION", @"HASH", @"DEBUGDESCRIPTION", @"SUPERCLASS", @"CLASS"];
+static inline NSString *zlmodel_autoTransformation(NSString *origin) {
+    static NSArray *needsAutoTransformationArray = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        needsAutoTransformationArray = @[@"ID", @"DESCRIPTION", @"HASH", @"DEBUGDESCRIPTION", @"SUPERCLASS", @"CLASS"];
+    });
     if ([needsAutoTransformationArray containsObject:origin]) {
         return [origin lowercaseString];
     }
     return origin;
 }
 
-+ (instancetype)zl_objectFromDictionary:(NSDictionary *)dic {
-    id object = [[[self class] alloc] init];
+static inline void inline_objectWithClassFromDictionary(id object, Class cls, NSDictionary *dic) {
     unsigned int outCount, i;
-    objc_property_t *properties = class_copyPropertyList([self class], &outCount);
+    objc_property_t *properties = class_copyPropertyList(cls, &outCount);
     for (i = 0; i < outCount; i++) {
         objc_property_t property = properties[i];
         NSString *key = [NSString stringWithUTF8String:property_getName(property)];
-        id value = [dic objectForKey:[self autoTransformation:key]];
+        id value = [dic objectForKey:zlmodel_autoTransformation(key)];
         if (value == nil) {
             continue;
         }
-        NSString *propertyType = [self propertyTypeEncoding:property];
-        if ([[self defaultIgnorePropertyArray] containsObject:propertyType]) {
+        NSString *propertyType = zlmodel_propertyTypeEncoding(property);
+        if ([zlmodel_defaultIgnorePropertyArray() containsObject:propertyType]) {
             continue;
         }
         NSString *methodName = [NSString stringWithFormat:@"set%@%@:",[key substringToIndex:1].uppercaseString, [key substringFromIndex:1]];
         SEL setter = sel_registerName(methodName.UTF8String);
         if ([object respondsToSelector:setter]) {
-            if ([[self basePropertyArray] containsObject:propertyType]) {
+            if ([zlmodel_basePropertyArray() containsObject:propertyType]) {
                 if ([propertyType isEqualToString:PropertyTypeInt]) {
                     if ([value isKindOfClass:[NSString class]]) {
                         ((void (*) (id, SEL, int)) objc_msgSend)(object, setter, [(NSString *)value intValue]);
@@ -222,33 +170,71 @@ static const void *NSDateFormatterString = "NSDateFormatterString";
                     } else if ([value isKindOfClass:[NSNumber class]]) {
                         ((void (*) (id, SEL, unsigned long long)) objc_msgSend)(object, setter, [(NSNumber *)value unsignedLongLongValue]);
                     }
-                } else if ([propertyType isEqualToString:PropertyTypeBOOL1]) {
+                } else if ([propertyType isEqualToString:PropertyTypeBOOL1] || [propertyType isEqualToString:PropertyTypeBOOL2] || [propertyType isEqualToString:PropertyTypeBOOL3]) {
                     if ([value isKindOfClass:[NSString class]]) {
                         ((void (*) (id, SEL, BOOL)) objc_msgSend)(object, setter, [(NSString *)value boolValue]);
                     } else if ([value isKindOfClass:[NSNumber class]]) {
                         ((void (*) (id, SEL, BOOL)) objc_msgSend)(object, setter, [(NSNumber *)value boolValue]);
                     }
-                } else if ([propertyType isEqualToString:PropertyTypeBOOL2]) {
-                    if ([value isKindOfClass:[NSString class]]) {
-                        ((void (*) (id, SEL, bool)) objc_msgSend)(object, setter, (bool)[(NSString *)value boolValue]);
-                    } else if ([value isKindOfClass:[NSNumber class]]) {
-                        ((void (*) (id, SEL, bool)) objc_msgSend)(object, setter, (bool)[(NSNumber *)value boolValue]);
-                    }
                 } else if ([propertyType isEqualToString:PropertyTypeCharPointer]) {
                     ((void (*) (id, SEL, const char *)) objc_msgSend)(object, setter, [(NSString *)value UTF8String]);
                 }
-            } else if ([self isFromFoundation:propertyType]) {
-                NSString *string = [self classStringFromFoundationPropertyType:propertyType];
+            } else if (zlmodel_isFromFoundation(propertyType)) {
+                NSString *string = zlmodel_classStringFromFoundationPropertyType(propertyType);
                 if (string == nil) {
                     continue;
                 }
-                NSString *className = [[self zl_objectClassInArray] objectForKey:key];
-                if (className != nil && ([string isEqualToString:@"NSArray"] || [string isEqualToString:@"NSMutableArray"])) {
-                    NSMutableArray *array = [NSMutableArray array];
-                    for (NSDictionary *dic in (NSArray *)value) {
-                        [array addObject:[NSClassFromString(className) zl_objectFromDictionary:dic]];
+                
+                if ([string isEqualToString:@"NSArray"] || [string isEqualToString:@"NSMutableArray"]) {
+                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    if (className) {
+                        NSMutableArray *array = [NSMutableArray array];
+                        Class cls = NSClassFromString(className);
+                        if (cls) {
+                            for (NSDictionary *dic in (NSArray *)value) {
+                                [array addObject:[cls zl_objectFromDictionary:dic]];
+                            }
+                        }
+                        ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, array);
+                    } else {
+                        if ([string isEqualToString:@"NSMutableArray"]) {
+                            if ([value isKindOfClass:[NSMutableArray class]]) {
+                                ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, value);
+                            } else {
+                                ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, [value mutableCopy]);
+                            }
+                        } else {
+                            ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, value);
+                        }
                     }
-                    ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, array);
+                } else if ([string isEqualToString:@"NSMutableDictionary"]) {
+                    if ([value isKindOfClass:[NSMutableDictionary class]]) {
+                        ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, value);
+                    } else {
+                        ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, [value mutableCopy]);
+                    }
+                }  else if ([string isEqualToString:@"NSSet"] || [string isEqualToString:@"NSMutableSet"]) {
+                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    if (className) {
+                        NSMutableSet *array = [NSMutableSet set];
+                        Class cls = NSClassFromString(className);
+                        if (cls) {
+                            for (NSDictionary *dic in (NSSet *)value) {
+                                [array addObject:[cls zl_objectFromDictionary:dic]];
+                            }
+                        }
+                        ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, array);
+                    } else {
+                        if ([string isEqualToString:@"NSMutableSet"]) {
+                            if ([value isKindOfClass:[NSMutableSet class]]) {
+                                ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, value);
+                            } else {
+                                ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, [value mutableCopy]);
+                            }
+                        } else {
+                            ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, value);
+                        }
+                    }
                 } else if ([string isEqualToString:@"CGRect"] || [string isEqualToString:@"NSRect"]) {
                     ((void (*) (id, SEL, CGRect)) objc_msgSend)(object, setter, CGRectFromString(value));
                 } else if ([string isEqualToString:@"CGSize"] || [string isEqualToString:@"NSSize"]) {
@@ -268,7 +254,7 @@ static const void *NSDateFormatterString = "NSDateFormatterString";
                         ((void (*) (id, SEL, NSUInteger)) objc_msgSend)(object, setter, [(NSNumber *)value unsignedIntegerValue]);
                     }
                 } else if ([string isEqualToString:@"NSDate"]) {
-                    NSDateFormatter *dateFromatter = self.zl_dateFormatter;
+                    NSDateFormatter *dateFromatter = [cls zl_dateFormatter];
                     if (dateFromatter == nil) {
                         double timeInterval = 0;
                         if ([value isKindOfClass:[NSString class]]) {
@@ -290,6 +276,454 @@ static const void *NSDateFormatterString = "NSDateFormatterString";
         }
     }
     free(properties);
+    
+    Class superClass = class_getSuperclass(cls);
+    if (superClass && ![NSStringFromClass(superClass) isEqualToString:@"NSObject"]) {
+        inline_objectWithClassFromDictionary(object, superClass, dic);
+    }
+}
+
+static inline void inline_objectToDictionaryWithClassAndDictionary(id object, Class cls, NSMutableDictionary *dict) {
+    unsigned int outCount = 0;
+    objc_property_t *propertyList = class_copyPropertyList(cls, &outCount);
+    for (int i = 0; i < outCount; i ++) {
+        objc_property_t property = propertyList[i];
+        
+        const char *propertyName = property_getName(property);
+        SEL getter = sel_registerName(propertyName);
+        NSString *key = [NSString stringWithUTF8String:propertyName];
+        NSString *propertyType = zlmodel_propertyTypeEncoding(property);
+        if ([zlmodel_defaultIgnorePropertyArray() containsObject:propertyType]) {
+            continue;
+        }
+        if ([object respondsToSelector:getter]) {
+            if ([zlmodel_basePropertyArray() containsObject:propertyType]) {
+                if ([propertyType isEqualToString:PropertyTypeInt]) {
+                    int value = ((int (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeShort]) {
+                    short value = ((short (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeUInt]) {
+                    unsigned int value = ((unsigned int (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeUShort]) {
+                    unsigned short value = ((unsigned short (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeFloat]) {
+                    float value = ((float (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeDouble]) {
+                    double value = ((double (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeLong]) {
+                    long value = ((long (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeLongLong]) {
+                    long long value = ((long long (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeULong]) {
+                    unsigned long value = ((unsigned long (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeULongLong]) {
+                    unsigned long long value = ((unsigned long long (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeBOOL1] || [propertyType isEqualToString:PropertyTypeBOOL2] || [propertyType isEqualToString:PropertyTypeBOOL3]) {
+                    BOOL value = ((BOOL (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeCharPointer]) {
+                    char *value = ((char * (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                }
+            } else if (zlmodel_isFromFoundation(propertyType)) {
+                NSString *string = zlmodel_classStringFromFoundationPropertyType(propertyType);
+                if (string == nil) {
+                    continue;
+                }
+                
+                if ([string isEqualToString:@"NSArray"] || [string isEqualToString:@"NSMutableArray"]) {
+                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    NSArray *value = ((NSArray * (*) (id, SEL)) objc_msgSend) (object, getter);
+                    if (className != nil) {
+                        NSMutableArray *array = [NSMutableArray array];
+                        for (NSObject *o in value) {
+                            [array addObject:o.zl_toDictionary];
+                        }
+                        [dict setObject:array forKey:zlmodel_autoTransformation(key)];
+                    } else if (value) {
+                        [dict setObject:value forKey:zlmodel_autoTransformation(key)];
+                    }
+                } else if ([string isEqualToString:@"NSSet"] || [string isEqualToString:@"NSMutableSet"]) {
+                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    NSSet *value = ((NSSet * (*) (id, SEL)) objc_msgSend) (object, getter);
+                    if (className != nil) {
+                        NSMutableSet *array = [NSMutableSet set];
+                        for (NSObject *o in value) {
+                            [array addObject:o.zl_toDictionary];
+                        }
+                        [dict setObject:array forKey:zlmodel_autoTransformation(key)];
+                    } else if (value) {
+                        [dict setObject:value forKey:zlmodel_autoTransformation(key)];
+                    }
+                } else if ([string isEqualToString:@"CGRect"] || [string isEqualToString:@"NSRect"]) {
+                    CGRect value = ((CGRect (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:NSStringFromCGRect(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([string isEqualToString:@"CGSize"] || [string isEqualToString:@"NSSize"]) {
+                    CGSize value = ((CGSize (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:NSStringFromCGSize(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([string isEqualToString:@"CGPoint"] || [string isEqualToString:@"NSPoint"]) {
+                    CGPoint value = ((CGPoint (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:NSStringFromCGPoint(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([string isEqualToString:@"NSInteger"]) {
+                    NSInteger value = ((NSInteger (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([string isEqualToString:@"NSUInteger"]) {
+                    NSUInteger value = ((NSUInteger (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [dict setObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([string isEqualToString:@"NSDate"]) {
+                    NSDate *value = ((NSDate * (*) (id, SEL)) objc_msgSend) (object, getter);
+                    NSDateFormatter *dateFromatter = [cls zl_dateFormatter];
+                    if (dateFromatter == nil) {
+                        [dict setObject:@([value timeIntervalSince1970]) forKey:zlmodel_autoTransformation(key)];
+                    } else {
+                        [dict setObject:[dateFromatter stringFromDate:value] forKey:zlmodel_autoTransformation(key)];
+                    }
+                } else {
+                    id value = ((id (*) (id,SEL)) objc_msgSend) (object, getter);
+                    if (value) {
+                        [dict setObject:value forKey:zlmodel_autoTransformation(key)];
+                    }
+                }
+            } else {
+                id value = ((id (*) (id,SEL)) objc_msgSend) (object, getter);
+                if (value) {
+                    [dict setObject:[value zl_toDictionary] forKey:zlmodel_autoTransformation(key)];
+                }
+            }
+        }
+    }
+    free(propertyList);
+    
+    Class superClass = class_getSuperclass(cls);
+    if (superClass && ![NSStringFromClass(superClass) isEqualToString:@"NSObject"]) {
+        inline_objectToDictionaryWithClassAndDictionary(object, superClass, dict);
+    }
+}
+
+static inline void inline_objectWithClassInEncode(id object, Class cls, NSCoder *aCoder) {
+    unsigned int outCount = 0;
+    objc_property_t *propertyList = class_copyPropertyList(cls, &outCount);
+    for (int i = 0; i < outCount; i ++) {
+        objc_property_t property = propertyList[i];
+        
+        const char *propertyName = property_getName(property);
+        SEL getter = sel_registerName(propertyName);
+        NSString *key = [NSString stringWithUTF8String:propertyName];
+        NSString *propertyType = zlmodel_propertyTypeEncoding(property);
+        if ([zlmodel_defaultIgnorePropertyArray() containsObject:propertyType]) {
+            continue;
+        }
+        if ([object respondsToSelector:getter]) {
+            if ([zlmodel_basePropertyArray() containsObject:propertyType]) {
+                if ([propertyType isEqualToString:PropertyTypeInt]) {
+                    int value = ((int (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeShort]) {
+                    short value = ((short (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeUInt]) {
+                    unsigned int value = ((unsigned int (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeUShort]) {
+                    unsigned short value = ((unsigned short (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeFloat]) {
+                    float value = ((float (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeDouble]) {
+                    double value = ((double (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeLong]) {
+                    long value = ((long (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeLongLong]) {
+                    long long value = ((long long (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeULong]) {
+                    unsigned long value = ((unsigned long (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeULongLong]) {
+                    unsigned long long value = ((unsigned long long (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeBOOL1]) {
+                    BOOL value = ((BOOL (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeBOOL2]) {
+                    bool value = ((bool (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([propertyType isEqualToString:PropertyTypeCharPointer]) {
+                    char *value = ((char * (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                }
+            } else if (zlmodel_isFromFoundation(propertyType)) {
+                NSString *string = zlmodel_classStringFromFoundationPropertyType(propertyType);
+                if (string == nil) {
+                    continue;
+                }
+                
+                if ([string isEqualToString:@"NSArray"] || [string isEqualToString:@"NSMutableArray"]) {
+                    NSArray *value = ((NSArray * (*) (id, SEL)) objc_msgSend) (object, getter);
+                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    if (className != nil) {
+                        NSMutableArray *array = [NSMutableArray array];
+                        for (NSObject *o in value) {
+                            [array addObject:o.zl_toDictionary];
+                        }
+                        [aCoder encodeObject:array forKey:zlmodel_autoTransformation(key)];
+                    } else if (value) {
+                        [aCoder encodeObject:value forKey:zlmodel_autoTransformation(key)];
+                    }
+                } else if ([string isEqualToString:@"NSSet"] || [string isEqualToString:@"NSMutableSet"]) {
+                    NSSet *value = ((NSSet * (*) (id, SEL)) objc_msgSend) (object, getter);
+                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    if (className != nil) {
+                        NSMutableSet *array = [NSMutableSet set];
+                        for (NSObject *o in value) {
+                            [array addObject:o.zl_toDictionary];
+                        }
+                        [aCoder encodeObject:array forKey:zlmodel_autoTransformation(key)];
+                    } else if (value) {
+                        [aCoder encodeObject:value forKey:zlmodel_autoTransformation(key)];
+                    }
+                } else if ([string isEqualToString:@"CGRect"] || [string isEqualToString:@"NSRect"]) {
+                    CGRect value = ((CGRect (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeCGRect:value forKey:zlmodel_autoTransformation(key)];
+                } else if ([string isEqualToString:@"CGSize"] || [string isEqualToString:@"NSSize"]) {
+                    CGSize value = ((CGSize (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeCGSize:value forKey:zlmodel_autoTransformation(key)];
+                } else if ([string isEqualToString:@"CGPoint"] || [string isEqualToString:@"NSPoint"]) {
+                    CGPoint value = ((CGPoint (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeCGPoint:value forKey:zlmodel_autoTransformation(key)];
+                } else if ([string isEqualToString:@"NSInteger"]) {
+                    NSInteger value = ((NSInteger (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([string isEqualToString:@"NSUInteger"]) {
+                    NSUInteger value = ((NSUInteger (*) (id, SEL)) objc_msgSend) (object, getter);
+                    [aCoder encodeObject:@(value) forKey:zlmodel_autoTransformation(key)];
+                } else if ([string isEqualToString:@"NSDate"]) {
+                    NSDate *date = ((NSDate * (*) (id, SEL)) objc_msgSend) (object, getter);
+                    NSDateFormatter *dateFromatter = [cls zl_dateFormatter];
+                    if (dateFromatter == nil) {
+                        [aCoder encodeObject:@([date timeIntervalSince1970]) forKey:zlmodel_autoTransformation(key)];
+                    } else {
+                        [aCoder encodeObject:[dateFromatter stringFromDate:date] forKey:zlmodel_autoTransformation(key)];
+                    }
+                    
+                } else {
+                    id value = ((id (*) (id,SEL)) objc_msgSend) (object, getter);
+                    if (value) {
+                        [aCoder encodeObject:value forKey:zlmodel_autoTransformation(key)];
+                    }
+                }
+            } else {
+                NSObject *value = ((NSObject * (*) (id,SEL)) objc_msgSend) (object, getter);
+                if (value) {
+                    [aCoder encodeObject:value.zl_toJSONString forKey:zlmodel_autoTransformation(key)];
+                }
+            }
+        }
+    }
+    free(propertyList);
+    
+    Class superClass = class_getSuperclass(cls);
+    if (superClass && ![NSStringFromClass(superClass) isEqualToString:@"NSObject"]) {
+        inline_objectWithClassInEncode(object, superClass, aCoder);
+    }
+}
+
+static inline void inline_objectWithClassInDecode(id object, Class cls, NSCoder *aCoder) {
+    unsigned int outCount, i;
+    objc_property_t *properties = class_copyPropertyList(cls, &outCount);
+    for (i = 0; i < outCount; i++) {
+        objc_property_t property = properties[i];
+        NSString *key = [NSString stringWithUTF8String:property_getName(property)];
+        NSString *propertyType = zlmodel_propertyTypeEncoding(property);
+        if ([zlmodel_defaultIgnorePropertyArray() containsObject:propertyType]) {
+            continue;
+        }
+        NSString *methodName = [NSString stringWithFormat:@"set%@%@:",[key substringToIndex:1].uppercaseString,[key substringFromIndex:1]];
+        SEL setter = sel_registerName(methodName.UTF8String);
+        if ([object respondsToSelector:setter]) {
+            if ([zlmodel_basePropertyArray() containsObject:propertyType]) {
+                if ([propertyType isEqualToString:PropertyTypeInt]) {
+                    ((void (*) (id, SEL, int)) objc_msgSend)(object, setter, ((NSNumber *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]).intValue);
+                } else if ([propertyType isEqualToString:PropertyTypeShort]) {
+                    ((void (*) (id, SEL, short)) objc_msgSend)(object, setter, (short)((NSNumber *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]).intValue);
+                } else if ([propertyType isEqualToString:PropertyTypeUInt]) {
+                    ((void (*) (id, SEL, unsigned int)) objc_msgSend)(object, setter, (unsigned int)((NSNumber *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]).intValue);
+                } else if ([propertyType isEqualToString:PropertyTypeUShort]) {
+                    ((void (*) (id, SEL, unsigned short)) objc_msgSend)(object, setter, (unsigned short)((NSNumber *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]).intValue);
+                } else if ([propertyType isEqualToString:PropertyTypeFloat]) {
+                    ((void (*) (id, SEL, float)) objc_msgSend)(object, setter, ((NSNumber *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]).floatValue);
+                } else if ([propertyType isEqualToString:PropertyTypeDouble]) {
+                    ((void (*) (id, SEL, double)) objc_msgSend)(object, setter, ((NSNumber *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]).doubleValue);
+                } else if ([propertyType isEqualToString:PropertyTypeLong]) {
+                    ((void (*) (id, SEL, long)) objc_msgSend)(object, setter, (long)((NSNumber *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]).longLongValue);
+                } else if ([propertyType isEqualToString:PropertyTypeLongLong]) {
+                    ((void (*) (id, SEL, long long)) objc_msgSend)(object, setter, ((NSNumber *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]).longLongValue);
+                } else if ([propertyType isEqualToString:PropertyTypeULong]) {
+                    ((void (*) (id, SEL, unsigned long)) objc_msgSend)(object, setter, (unsigned long)((NSNumber *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]).unsignedLongLongValue);
+                } else if ([propertyType isEqualToString:PropertyTypeULongLong]) {
+                    ((void (*) (id, SEL, unsigned long long)) objc_msgSend)(object, setter, ((NSNumber *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]).unsignedLongLongValue);
+                } else if ([propertyType isEqualToString:PropertyTypeBOOL1]) {
+                    ((void (*) (id, SEL, BOOL)) objc_msgSend)(object, setter, ((NSNumber *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]).boolValue);
+                } else if ([propertyType isEqualToString:PropertyTypeBOOL2]) {
+                    ((void (*) (id, SEL, bool)) objc_msgSend)(object, setter, (bool)((NSNumber *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]).boolValue);
+                } else if ([propertyType isEqualToString:PropertyTypeCharPointer]) {
+                    ((void (*) (id, SEL, const char *)) objc_msgSend)(object, setter, [(NSString *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)] UTF8String]);
+                }
+            } else if (zlmodel_isFromFoundation(propertyType)) {
+                NSString *string = zlmodel_classStringFromFoundationPropertyType(propertyType);
+                if (string == nil) {
+                    continue;
+                }
+                
+                if ([string isEqualToString:@"NSArray"] || [string isEqualToString:@"NSMutableArray"]) {
+                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    NSArray *value = [aCoder decodeObjectForKey:zlmodel_autoTransformation(key)];
+                    if (className != nil) {
+                        NSMutableArray *array = [NSMutableArray array];
+                        for (NSDictionary *dic in value) {
+                            [array addObject:[NSClassFromString(className) zl_objectFromDictionary:dic]];
+                        }
+                        ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, array);
+                    } else {
+                        if ([string isEqualToString:@"NSArray"]) {
+                            ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, value);
+                        } else {
+                            if ([value isKindOfClass:[NSMutableArray class]]) {
+                                ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, value);
+                            } else {
+                                ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, [value mutableCopy]);
+                            }
+                        }
+                    }
+                } else if ([string isEqualToString:@"NSSet"] || [string isEqualToString:@"NSMutableSet"]) {
+                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    NSArray *value = [aCoder decodeObjectForKey:zlmodel_autoTransformation(key)];
+                    if (className != nil) {
+                        NSMutableSet *array = [NSMutableSet set];
+                        for (NSDictionary *dic in value) {
+                            [array addObject:[NSClassFromString(className) zl_objectFromDictionary:dic]];
+                        }
+                        ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, array);
+                    } else {
+                        if ([string isEqualToString:@"NSSet"]) {
+                            ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, value);
+                        } else {
+                            if ([value isKindOfClass:[NSMutableSet class]]) {
+                                ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, value);
+                            } else {
+                                ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, [value mutableCopy]);
+                            }
+                        }
+                    }
+                } else if ([string isEqualToString:@"CGRect"] || [string isEqualToString:@"NSRect"]) {
+                    ((void (*) (id, SEL, CGRect)) objc_msgSend)(object, setter, [aCoder decodeCGRectForKey:zlmodel_autoTransformation(key)]);
+                } else if ([string isEqualToString:@"CGSize"] || [string isEqualToString:@"NSSize"]) {
+                    ((void (*) (id, SEL, CGSize)) objc_msgSend)(object, setter, [aCoder decodeCGSizeForKey:zlmodel_autoTransformation(key)]);
+                } else if ([string isEqualToString:@"CGPoint"] || [string isEqualToString:@"NSPoint"]) {
+                    ((void (*) (id, SEL, CGPoint)) objc_msgSend)(object, setter, [aCoder decodeCGPointForKey:zlmodel_autoTransformation(key)]);
+                } else if ([string isEqualToString:@"NSInteger"]) {
+                    ((void (*) (id, SEL, NSInteger)) objc_msgSend)(object, setter, ((NSNumber *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]).integerValue);
+                } else if ([string isEqualToString:@"NSUInteger"]) {
+                    ((void (*) (id, SEL, NSUInteger)) objc_msgSend)(object, setter, ((NSNumber *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]).unsignedIntegerValue);
+                } else if ([string isEqualToString:@"NSDate"]) {
+                    NSDateFormatter *dateFromatter = [cls zl_dateFormatter];
+                    if (dateFromatter == nil) {
+                        double timeInterval = ((NSNumber *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]).doubleValue;
+                        ((void (*) (id, SEL, NSDate *)) objc_msgSend)(object, setter, [NSDate dateWithTimeIntervalSince1970:timeInterval]);
+                    } else {
+                        ((void (*) (id, SEL, NSDate *)) objc_msgSend)(object, setter, [dateFromatter dateFromString:[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]]);
+                    }
+                } else {
+                    ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, [aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]);
+                }
+            } else {
+                id v = [NSClassFromString([propertyType substringWithRange:NSMakeRange(2, propertyType.length - 3)]) zl_objectFromJsonString:(NSString *)[aCoder decodeObjectForKey:zlmodel_autoTransformation(key)]];
+                ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, v);
+            }
+        }
+    }
+    free(properties);
+    
+    Class superClass = class_getSuperclass(cls);
+    if (superClass && ![NSStringFromClass(superClass) isEqualToString:@"NSObject"]) {
+        inline_objectWithClassInDecode(object, superClass, aCoder);
+    }
+}
+
+@implementation NSObject (ZLModel)
+
++ (void)zl_swizzleSelector:(SEL)originalSelector withAnotherSelector:(SEL)swizzledSelector {
+    Class aClass = [self class];
+    
+    Method originalMethod = class_getInstanceMethod(aClass, originalSelector);
+    Method swizzledMethod = class_getInstanceMethod(aClass, swizzledSelector);
+    
+    BOOL didAddMethod =
+        class_addMethod(aClass,
+                        originalSelector,
+                        method_getImplementation(swizzledMethod),
+                        method_getTypeEncoding(swizzledMethod));
+    
+    if (didAddMethod) {
+        class_replaceMethod(aClass,
+                            swizzledSelector,
+                            method_getImplementation(originalMethod),
+                            method_getTypeEncoding(originalMethod));
+    } else {
+        method_exchangeImplementations(originalMethod, swizzledMethod);
+    }
+}
+
++ (NSDateFormatter *)zl_dateFormatter {
+    NSDateFormatter *formatter = objc_getAssociatedObject(self, NSDateFormatterString);
+    NSString *dateFormatterString = [self zl_dateFormatString];
+    if (formatter == nil) {
+        if (dateFormatterString != nil && ![dateFormatterString isEqualToString:@""]) {
+            formatter = [[NSDateFormatter alloc] init];
+            formatter.timeZone = [NSTimeZone systemTimeZone];
+            formatter.dateFormat = dateFormatterString;
+            objc_setAssociatedObject(self, NSDateFormatterString, formatter, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+    } else if (dateFormatterString == nil || [dateFormatterString isEqualToString:@""]) {
+        objc_setAssociatedObject(self, NSDateFormatterString, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    } else {
+        formatter.dateFormat = dateFormatterString;
+        formatter.timeZone = [NSTimeZone systemTimeZone];
+        objc_setAssociatedObject(self, NSDateFormatterString, formatter, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    return formatter;
+}
+
++ (void)zl_setDateFormatString:(NSString *)string {
+    [self willChangeValueForKey:@"zl_dateFormatString"];
+    objc_setAssociatedObject(self, DateFormatString, string, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    [self didChangeValueForKey:@"zl_dateFormatString"];
+}
+
++ (NSString *)zl_dateFormatString {
+    return objc_getAssociatedObject(self, DateFormatString);
+}
+
++ (NSDictionary *)zl_objectClassInArray {
+    return @{@"": @""};
+}
+
++ (instancetype)zl_objectFromDictionary:(NSDictionary *)dic {
+    id object = [[[self class] alloc] init];
+    inline_objectWithClassFromDictionary(object, [self class], dic);
     return object;
 }
 
@@ -302,7 +736,8 @@ static const void *NSDateFormatterString = "NSDateFormatterString";
 }
 
 + (instancetype)zl_objectFromJsonString:(NSString *)string {
-    id object = [self valueWithJsonString:string];
+    NSError *error = nil;
+    id object = [NSJSONSerialization JSONObjectWithData:[string dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingMutableContainers error:&error];
     if (object == nil) {
         return nil;
     }
@@ -314,12 +749,6 @@ static const void *NSDateFormatterString = "NSDateFormatterString";
     return [cls zl_objectArrayFromArray:object];
 }
 
-+ (id)valueWithJsonString:(NSString *)string {
-    NSError *error = nil;
-    id object = [NSJSONSerialization JSONObjectWithData:[string dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingMutableContainers error:&error];
-    return object;
-}
-
 - (NSMutableArray *)zl_arrayWithObjectArray:(NSArray *)objectArray {
     NSMutableArray *array = [NSMutableArray array];
     for (id object in objectArray) {
@@ -329,112 +758,8 @@ static const void *NSDateFormatterString = "NSDateFormatterString";
 }
 
 - (NSDictionary *)zl_toDictionary {
-    unsigned int outCount = 0;
-    objc_property_t *propertyList = class_copyPropertyList([self class], &outCount);
     NSMutableDictionary *dict = [NSMutableDictionary dictionary];
-    for (int i = 0; i < outCount; i ++) {
-        objc_property_t property = propertyList[i];
-        
-        const char *propertyName = property_getName(property);
-        SEL getter = sel_registerName(propertyName);
-        NSString *key = [NSString stringWithUTF8String:propertyName];
-        NSString *propertyType = [[self class] propertyTypeEncoding:property];
-        if ([[[self class] defaultIgnorePropertyArray] containsObject:propertyType]) {
-            continue;
-        }
-        if ([self respondsToSelector:getter]) {
-            if ([[[self class] basePropertyArray] containsObject:propertyType]) {
-                if ([propertyType isEqualToString:PropertyTypeInt]) {
-                    int value = ((int (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeShort]) {
-                    short value = ((short (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeUInt]) {
-                    unsigned int value = ((unsigned int (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeUShort]) {
-                    unsigned short value = ((unsigned short (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeFloat]) {
-                    float value = ((float (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeDouble]) {
-                    double value = ((double (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeLong]) {
-                    long value = ((long (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeLongLong]) {
-                    long long value = ((long long (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeULong]) {
-                    unsigned long value = ((unsigned long (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeULongLong]) {
-                    unsigned long long value = ((unsigned long long (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeBOOL1]) {
-                    BOOL value = ((BOOL (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeBOOL2]) {
-                    bool value = ((bool (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeCharPointer]) {
-                    char *value = ((char * (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:@(value) forKey:[[self class] autoTransformation:key]];
-                }
-            } else if ([[self class] isFromFoundation:propertyType]) {
-                NSString *string = [[self class] classStringFromFoundationPropertyType:propertyType];
-                if (string == nil) {
-                    continue;
-                }
-                NSString *className = [[[self class] zl_objectClassInArray] objectForKey:key];
-                if (className != nil && ([string isEqualToString:@"NSArray"] || [string isEqualToString:@"NSMutableArray"])) {
-                    NSArray *value = ((NSArray * (*) (id, SEL)) objc_msgSend) (self, getter);
-                    NSMutableArray *array = [NSMutableArray array];
-                    for (NSObject *o in value) {
-                        [array addObject:o.zl_toDictionary];
-                    }
-                    [dict setObject:array forKey:[[self class] autoTransformation:key]];
-                } else if ([string isEqualToString:@"CGRect"] || [string isEqualToString:@"NSRect"]) {
-                    CGRect value = ((CGRect (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:NSStringFromCGRect(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([string isEqualToString:@"CGSize"] || [string isEqualToString:@"NSSize"]) {
-                    CGSize value = ((CGSize (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:NSStringFromCGSize(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([string isEqualToString:@"CGPoint"] || [string isEqualToString:@"NSPoint"]) {
-                    CGPoint value = ((CGPoint (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:NSStringFromCGPoint(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([string isEqualToString:@"NSInteger"]) {
-                    NSInteger value = ((NSInteger (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([string isEqualToString:@"NSUInteger"]) {
-                    NSUInteger value = ((NSUInteger (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [dict setObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([string isEqualToString:@"NSDate"]) {
-                    NSDate *value = ((NSDate * (*) (id, SEL)) objc_msgSend) (self, getter);
-                    NSDateFormatter *dateFromatter = [self class].zl_dateFormatter;
-                    if (dateFromatter == nil) {
-                        [dict setObject:@([value timeIntervalSince1970]) forKey:[[self class] autoTransformation:key]];
-                    } else {
-                        [dict setObject:[dateFromatter stringFromDate:value] forKey:[[self class] autoTransformation:key]];
-                    }
-                } else {
-                    id value = ((id (*) (id,SEL)) objc_msgSend) (self, getter);
-                    if (value) {
-                        [dict setObject:value forKey:[[self class] autoTransformation:key]];
-                    }
-                }
-            } else {
-                id value = ((id (*) (id,SEL)) objc_msgSend) (self, getter);
-                if (value) {
-                    [dict setObject:[value zl_toDictionary] forKey:[[self class] autoTransformation:key]];
-                }
-            }
-        }
-    }
-    free(propertyList);
+    inline_objectToDictionaryWithClassAndDictionary(self, [self class], dict);
     return dict;
 }
 
@@ -453,188 +778,11 @@ static const void *NSDateFormatterString = "NSDateFormatterString";
 }
 
 - (void)zl_coderEncode:(NSCoder *)aCoder {
-    unsigned int outCount = 0;
-    objc_property_t *propertyList = class_copyPropertyList([self class], &outCount);
-    for (int i = 0; i < outCount; i ++) {
-        objc_property_t property = propertyList[i];
-        
-        const char *propertyName = property_getName(property);
-        SEL getter = sel_registerName(propertyName);
-        NSString *key = [NSString stringWithUTF8String:propertyName];
-        NSString *propertyType = [[self class] propertyTypeEncoding:property];
-        if ([[[self class] defaultIgnorePropertyArray] containsObject:propertyType]) {
-            continue;
-        }
-        if ([self respondsToSelector:getter]) {
-            if ([[[self class] basePropertyArray] containsObject:propertyType]) {
-                if ([propertyType isEqualToString:PropertyTypeInt]) {
-                    int value = ((int (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeShort]) {
-                    short value = ((short (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeUInt]) {
-                    unsigned int value = ((unsigned int (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeUShort]) {
-                    unsigned short value = ((unsigned short (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeFloat]) {
-                    float value = ((float (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeDouble]) {
-                    double value = ((double (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeLong]) {
-                    long value = ((long (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeLongLong]) {
-                    long long value = ((long long (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeULong]) {
-                    unsigned long value = ((unsigned long (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeULongLong]) {
-                    unsigned long long value = ((unsigned long long (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeBOOL1]) {
-                    BOOL value = ((BOOL (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeBOOL2]) {
-                    bool value = ((bool (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([propertyType isEqualToString:PropertyTypeCharPointer]) {
-                    char *value = ((char * (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeObject:@(value) forKey:[[self class] autoTransformation:key]];
-                }
-            } else if ([[self class] isFromFoundation:propertyType]) {
-                NSString *string = [[self class] classStringFromFoundationPropertyType:propertyType];
-                if (string == nil) {
-                    continue;
-                }
-                if ([string isEqualToString:@"CGRect"] || [string isEqualToString:@"NSRect"]) {
-                    CGRect value = ((CGRect (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeCGRect:value forKey:[[self class] autoTransformation:key]];
-                } else if ([string isEqualToString:@"CGSize"] || [string isEqualToString:@"NSSize"]) {
-                    CGSize value = ((CGSize (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeCGSize:value forKey:[[self class] autoTransformation:key]];
-                } else if ([string isEqualToString:@"CGPoint"] || [string isEqualToString:@"NSPoint"]) {
-                    CGPoint value = ((CGPoint (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeCGPoint:value forKey:[[self class] autoTransformation:key]];
-                } else if ([string isEqualToString:@"NSInteger"]) {
-                    NSInteger value = ((NSInteger (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([string isEqualToString:@"NSUInteger"]) {
-                    NSUInteger value = ((NSUInteger (*) (id, SEL)) objc_msgSend) (self, getter);
-                    [aCoder encodeObject:@(value) forKey:[[self class] autoTransformation:key]];
-                } else if ([string isEqualToString:@"NSDate"]) {
-                    NSDate *date = ((NSDate * (*) (id, SEL)) objc_msgSend) (self, getter);
-                    NSDateFormatter *dateFromatter = [self class].zl_dateFormatter;
-                    if (dateFromatter == nil) {
-                        [aCoder encodeObject:@([date timeIntervalSince1970]) forKey:[[self class] autoTransformation:key]];
-                    } else {
-                        [aCoder encodeObject:[dateFromatter stringFromDate:date] forKey:[[self class] autoTransformation:key]];
-                    }
-                    
-                } else {
-                    id value = ((id (*) (id,SEL)) objc_msgSend) (self, getter);
-                    if (value) {
-                        [aCoder encodeObject:value forKey:[[self class] autoTransformation:key]];
-                    }
-                }
-            } else {
-                NSObject *value = ((NSObject * (*) (id,SEL)) objc_msgSend) (self, getter);
-                if (value) {
-                    [aCoder encodeObject:value.zl_toJSONString forKey:[[self class] autoTransformation:key]];
-                }
-            }
-        }
-    }
-    free(propertyList);
+    inline_objectWithClassInEncode(self, [self class], aCoder);
 }
 
 - (void)zl_coderDecode:(NSCoder *)aCoder {
-    unsigned int outCount, i;
-    objc_property_t *properties = class_copyPropertyList([self class], &outCount);
-    for (i = 0; i < outCount; i++) {
-        objc_property_t property = properties[i];
-        NSString *key = [NSString stringWithUTF8String:property_getName(property)];
-        NSString *propertyType = [[self class] propertyTypeEncoding:property];
-        if ([[[self class] defaultIgnorePropertyArray] containsObject:propertyType]) {
-            continue;
-        }
-        NSString *methodName = [NSString stringWithFormat:@"set%@%@:",[key substringToIndex:1].uppercaseString,[key substringFromIndex:1]];
-        SEL setter = sel_registerName(methodName.UTF8String);
-        if ([self respondsToSelector:setter]) {
-            if ([[[self class] basePropertyArray] containsObject:propertyType]) {
-                if ([propertyType isEqualToString:PropertyTypeInt]) {
-                    ((void (*) (id, SEL, int)) objc_msgSend)(self, setter, ((NSNumber *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]).intValue);
-                } else if ([propertyType isEqualToString:PropertyTypeShort]) {
-                    ((void (*) (id, SEL, short)) objc_msgSend)(self, setter, (short)((NSNumber *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]).intValue);
-                } else if ([propertyType isEqualToString:PropertyTypeUInt]) {
-                    ((void (*) (id, SEL, unsigned int)) objc_msgSend)(self, setter, (unsigned int)((NSNumber *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]).intValue);
-                } else if ([propertyType isEqualToString:PropertyTypeUShort]) {
-                    ((void (*) (id, SEL, unsigned short)) objc_msgSend)(self, setter, (unsigned short)((NSNumber *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]).intValue);
-                } else if ([propertyType isEqualToString:PropertyTypeFloat]) {
-                    ((void (*) (id, SEL, float)) objc_msgSend)(self, setter, ((NSNumber *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]).floatValue);
-                } else if ([propertyType isEqualToString:PropertyTypeDouble]) {
-                    ((void (*) (id, SEL, double)) objc_msgSend)(self, setter, ((NSNumber *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]).doubleValue);
-                } else if ([propertyType isEqualToString:PropertyTypeLong]) {
-                    ((void (*) (id, SEL, long)) objc_msgSend)(self, setter, (long)((NSNumber *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]).longLongValue);
-                } else if ([propertyType isEqualToString:PropertyTypeLongLong]) {
-                    ((void (*) (id, SEL, long long)) objc_msgSend)(self, setter, ((NSNumber *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]).longLongValue);
-                } else if ([propertyType isEqualToString:PropertyTypeULong]) {
-                    ((void (*) (id, SEL, unsigned long)) objc_msgSend)(self, setter, (unsigned long)((NSNumber *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]).unsignedLongLongValue);
-                } else if ([propertyType isEqualToString:PropertyTypeULongLong]) {
-                    ((void (*) (id, SEL, unsigned long long)) objc_msgSend)(self, setter, ((NSNumber *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]).unsignedLongLongValue);
-                } else if ([propertyType isEqualToString:PropertyTypeBOOL1]) {
-                    ((void (*) (id, SEL, BOOL)) objc_msgSend)(self, setter, ((NSNumber *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]).boolValue);
-                } else if ([propertyType isEqualToString:PropertyTypeBOOL2]) {
-                    ((void (*) (id, SEL, bool)) objc_msgSend)(self, setter, (bool)((NSNumber *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]).boolValue);
-                } else if ([propertyType isEqualToString:PropertyTypeCharPointer]) {
-                    ((void (*) (id, SEL, const char *)) objc_msgSend)(self, setter, [(NSString *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]] UTF8String]);
-                }
-            } else if ([[self class] isFromFoundation:propertyType]) {
-                NSString *string = [[self class] classStringFromFoundationPropertyType:propertyType];
-                if (string == nil) {
-                    continue;
-                }
-                NSString *className = [[[self class] zl_objectClassInArray] objectForKey:key];
-                if (className != nil && ([string isEqualToString:@"NSArray"] || [string isEqualToString:@"NSMutableArray"])) {
-                    NSArray *value = [aCoder decodeObjectForKey:[[self class] autoTransformation:key]];
-                    NSMutableArray *array = [NSMutableArray array];
-                    for (NSDictionary *dic in value) {
-                        [array addObject:[NSClassFromString(className) zl_objectFromDictionary:dic]];
-                    }
-                    ((void (*) (id, SEL, id)) objc_msgSend)(self, setter, array);
-                } else if ([string isEqualToString:@"CGRect"] || [string isEqualToString:@"NSRect"]) {
-                    ((void (*) (id, SEL, CGRect)) objc_msgSend)(self, setter, [aCoder decodeCGRectForKey:[[self class] autoTransformation:key]]);
-                } else if ([string isEqualToString:@"CGSize"] || [string isEqualToString:@"NSSize"]) {
-                    ((void (*) (id, SEL, CGSize)) objc_msgSend)(self, setter, [aCoder decodeCGSizeForKey:[[self class] autoTransformation:key]]);
-                } else if ([string isEqualToString:@"CGPoint"] || [string isEqualToString:@"NSPoint"]) {
-                    ((void (*) (id, SEL, CGPoint)) objc_msgSend)(self, setter, [aCoder decodeCGPointForKey:[[self class] autoTransformation:key]]);
-                } else if ([string isEqualToString:@"NSInteger"]) {
-                    ((void (*) (id, SEL, NSInteger)) objc_msgSend)(self, setter, ((NSNumber *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]).integerValue);
-                } else if ([string isEqualToString:@"NSUInteger"]) {
-                    ((void (*) (id, SEL, NSUInteger)) objc_msgSend)(self, setter, ((NSNumber *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]).unsignedIntegerValue);
-                } else if ([string isEqualToString:@"NSDate"]) {
-                    NSDateFormatter *dateFromatter = [self class].zl_dateFormatter;
-                    if (dateFromatter == nil) {
-                        double timeInterval = ((NSNumber *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]).doubleValue;
-                        ((void (*) (id, SEL, NSDate *)) objc_msgSend)(self, setter, [NSDate dateWithTimeIntervalSince1970:timeInterval]);
-                    } else {
-                        ((void (*) (id, SEL, NSDate *)) objc_msgSend)(self, setter, [dateFromatter dateFromString:[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]]);
-                    }
-                } else {
-                    ((void (*) (id, SEL, id)) objc_msgSend)(self, setter, [aCoder decodeObjectForKey:[[self class] autoTransformation:key]]);
-                }
-            } else {
-                id v = [NSClassFromString([propertyType substringWithRange:NSMakeRange(2, propertyType.length - 3)]) zl_objectFromJsonString:(NSString *)[aCoder decodeObjectForKey:[[self class] autoTransformation:key]]];
-                ((void (*) (id, SEL, id)) objc_msgSend)(self, setter, v);
-            }
-        }
-    }
-    free(properties);
+    inline_objectWithClassInDecode(self, [self class], aCoder);
 }
 
 @end
