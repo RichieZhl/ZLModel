@@ -7,6 +7,7 @@
 //
 
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 
 /**
  归档的实现
@@ -83,7 +84,7 @@ return self; \
  *
  *  @return 数组模型属性名及这个数组中的模型Class
  */
-+ (NSDictionary *)zl_objectClassInArray;
++ (NSDictionary<NSString *, Class> *)zl_objectClassInArray;
 /**
  *  归档序列化与反序列化
  *

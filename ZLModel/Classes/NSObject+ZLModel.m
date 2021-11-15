@@ -8,7 +8,6 @@
 
 #import "NSObject+ZLModel.h"
 #include <stdlib.h>
-#import <objc/runtime.h>
 #import <objc/message.h>
 
 static NSString *const PropertyTypeInt = @"i";
@@ -189,11 +188,10 @@ static inline void inline_objectWithClassFromDictionary(id object, Class cls, NS
                 }
                 
                 if ([string isEqualToString:@"NSArray"] || [string isEqualToString:@"NSMutableArray"]) {
-                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    Class className = [[cls zl_objectClassInArray] objectForKey:key];
                     if (className) {
                         NSMutableArray *array = [NSMutableArray array];
-                        Class cls = NSClassFromString(className);
-                        if (cls && ([value isKindOfClass:[NSArray class]] || [value isKindOfClass:[NSSet class]])) {
+                        if ([value isKindOfClass:[NSArray class]] || [value isKindOfClass:[NSSet class]]) {
                             for (NSDictionary *dic in (NSArray *)value) {
                                 [array addObject:[cls zl_objectFromDictionary:dic]];
                             }
@@ -217,11 +215,10 @@ static inline void inline_objectWithClassFromDictionary(id object, Class cls, NS
                         ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, [value mutableCopy]);
                     }
                 }  else if ([string isEqualToString:@"NSSet"] || [string isEqualToString:@"NSMutableSet"]) {
-                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    Class className = [[cls zl_objectClassInArray] objectForKey:key];
                     if (className) {
                         NSMutableSet *array = [NSMutableSet set];
-                        Class cls = NSClassFromString(className);
-                        if (cls && ([value isKindOfClass:[NSSet class]] || [value isKindOfClass:[NSArray class]])) {
+                        if ([value isKindOfClass:[NSSet class]] || [value isKindOfClass:[NSArray class]]) {
                             for (NSDictionary *dic in value) {
                                 [array addObject:[cls zl_objectFromDictionary:dic]];
                             }
@@ -351,7 +348,7 @@ static inline void inline_objectToDictionaryWithClassAndDictionary(id object, Cl
                 }
                 
                 if ([string isEqualToString:@"NSArray"] || [string isEqualToString:@"NSMutableArray"]) {
-                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    Class className = [[cls zl_objectClassInArray] objectForKey:key];
                     NSArray *value = ((NSArray * (*) (id, SEL)) objc_msgSend) (object, getter);
                     if (className) {
                         NSMutableArray *array = [NSMutableArray array];
@@ -363,7 +360,7 @@ static inline void inline_objectToDictionaryWithClassAndDictionary(id object, Cl
                         [dict setObject:value forKey:zlmodel_autoTransformation(key)];
                     }
                 } else if ([string isEqualToString:@"NSSet"] || [string isEqualToString:@"NSMutableSet"]) {
-                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    Class className = [[cls zl_objectClassInArray] objectForKey:key];
                     NSSet *value = ((NSSet * (*) (id, SEL)) objc_msgSend) (object, getter);
                     if (className) {
                         NSMutableSet *array = [NSMutableSet set];
@@ -482,7 +479,7 @@ static inline void inline_objectWithClassInEncode(id object, Class cls, NSCoder 
                 
                 if ([string isEqualToString:@"NSArray"] || [string isEqualToString:@"NSMutableArray"]) {
                     NSArray *value = ((NSArray * (*) (id, SEL)) objc_msgSend) (object, getter);
-                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    Class className = [[cls zl_objectClassInArray] objectForKey:key];
                     if (className) {
                         NSMutableArray *array = [NSMutableArray array];
                         for (NSObject *o in value) {
@@ -494,7 +491,7 @@ static inline void inline_objectWithClassInEncode(id object, Class cls, NSCoder 
                     }
                 } else if ([string isEqualToString:@"NSSet"] || [string isEqualToString:@"NSMutableSet"]) {
                     NSSet *value = ((NSSet * (*) (id, SEL)) objc_msgSend) (object, getter);
-                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    Class className = [[cls zl_objectClassInArray] objectForKey:key];
                     if (className) {
                         NSMutableSet *array = [NSMutableSet set];
                         for (NSObject *o in value) {
@@ -598,12 +595,12 @@ static inline void inline_objectWithClassInDecode(id object, Class cls, NSCoder 
                 }
                 
                 if ([string isEqualToString:@"NSArray"] || [string isEqualToString:@"NSMutableArray"]) {
-                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    Class className = [[cls zl_objectClassInArray] objectForKey:key];
                     NSArray *value = [aCoder decodeObjectForKey:zlmodel_autoTransformation(key)];
                     if (className) {
                         NSMutableArray *array = [NSMutableArray array];
                         for (NSDictionary *dic in value) {
-                            [array addObject:[NSClassFromString(className) zl_objectFromDictionary:dic]];
+                            [array addObject:[className zl_objectFromDictionary:dic]];
                         }
                         ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, array);
                     } else {
@@ -618,12 +615,12 @@ static inline void inline_objectWithClassInDecode(id object, Class cls, NSCoder 
                         }
                     }
                 } else if ([string isEqualToString:@"NSSet"] || [string isEqualToString:@"NSMutableSet"]) {
-                    NSString *className = [[cls zl_objectClassInArray] objectForKey:key];
+                    Class className = [[cls zl_objectClassInArray] objectForKey:key];
                     NSArray *value = [aCoder decodeObjectForKey:zlmodel_autoTransformation(key)];
                     if (className != nil) {
                         NSMutableSet *array = [NSMutableSet set];
                         for (NSDictionary *dic in value) {
-                            [array addObject:[NSClassFromString(className) zl_objectFromDictionary:dic]];
+                            [array addObject:[className zl_objectFromDictionary:dic]];
                         }
                         ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, array);
                     } else {
@@ -726,8 +723,8 @@ static inline void inline_objectWithClassInDecode(id object, Class cls, NSCoder 
     return objc_getAssociatedObject(self, DateFormatString);
 }
 
-+ (NSDictionary *)zl_objectClassInArray {
-    return @{@"": @""};
++ (NSDictionary<NSString *, Class> *)zl_objectClassInArray {
+    return @{};
 }
 
 + (instancetype)zl_objectFromDictionary:(NSDictionary *)dic {
