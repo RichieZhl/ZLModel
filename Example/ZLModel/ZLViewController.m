@@ -38,34 +38,6 @@ ZLCodingImplementation
 
 @end
 
-
-@interface RootData : NSObject
-
-@property (nonatomic, copy) NSDate *deploy_time;
-
-@property (nonatomic, strong) NSMutableArray<RootDataRoutes *> *routes;
-
-@end
-
-@implementation RootData
-
-@synthesize deploy_time = _deploy_time;
-
-@synthesize routes = _routes;
-
-+ (NSDictionary *)zl_objectClassInArray {
-    return @{@"routes": @"RootDataRoutes"};
-}
-
-+ (void)initialize {
-    [[self class] zl_setDateFormatString:@"yyyy-MM-dd HH:mm:ss"];
-}
-
-ZLCodingImplementation
-
-@end
-
-
 @interface RootDataRoutes : NSObject
 
 @property (nonatomic, copy) NSString *remote_file;
@@ -91,6 +63,32 @@ ZLCodingImplementation
 @synthesize uri = _uri;
 
 @synthesize version = _version;
+
+ZLCodingImplementation
+
+@end
+
+@interface RootData : NSObject
+
+@property (nonatomic, copy) NSDate *deploy_time;
+
+@property (nonatomic, strong) NSMutableArray<RootDataRoutes *> *routes;
+
+@end
+
+@implementation RootData
+
+@synthesize deploy_time = _deploy_time;
+
+@synthesize routes = _routes;
+
++ (NSDictionary<NSString *, Class> *)zl_objectClassInArray {
+    return @{@"routes": [RootDataRoutes class]};
+}
+
++ (void)initialize {
+    [[self class] zl_setDateFormatString:@"yyyy-MM-dd HH:mm:ss"];
+}
 
 ZLCodingImplementation
 

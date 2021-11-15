@@ -193,7 +193,7 @@ static inline void inline_objectWithClassFromDictionary(id object, Class cls, NS
                         NSMutableArray *array = [NSMutableArray array];
                         if ([value isKindOfClass:[NSArray class]] || [value isKindOfClass:[NSSet class]]) {
                             for (NSDictionary *dic in (NSArray *)value) {
-                                [array addObject:[cls zl_objectFromDictionary:dic]];
+                                [array addObject:[className zl_objectFromDictionary:dic]];
                             }
                         }
                         ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, array);
@@ -220,7 +220,7 @@ static inline void inline_objectWithClassFromDictionary(id object, Class cls, NS
                         NSMutableSet *array = [NSMutableSet set];
                         if ([value isKindOfClass:[NSSet class]] || [value isKindOfClass:[NSArray class]]) {
                             for (NSDictionary *dic in value) {
-                                [array addObject:[cls zl_objectFromDictionary:dic]];
+                                [array addObject:[className zl_objectFromDictionary:dic]];
                             }
                         }
                         ((void (*) (id, SEL, id)) objc_msgSend)(object, setter, array);
